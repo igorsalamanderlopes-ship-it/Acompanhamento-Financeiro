@@ -1,6 +1,6 @@
 {
-  "name": "Margem, organização financeira",
-  "short_name": "Margem",
+  "name": "Acomp.Finc, organização financeira",
+  "short_name": "Acomp.Finc",
   "description": "Controle de gastos por ciclo de pagamento, com metas, parcelas e carteiras de benefício.",
   "start_url": "./index.html",
   "scope": "./",

@@ -1,4 +1,4 @@
-const CACHE = 'margem-v1';
+const CACHE = 'acompfinc-v2';
 const ARQUIVOS = ['./', './index.html', './manifest.json', './icone-192.png', './icone-512.png'];
 
 self.addEventListener('install', e => {

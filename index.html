@@ -1169,36 +1169,58 @@ function abrirLancamento(){
       opcoesCarteira(null, usuarioAtivo()) + '</select></div>' +
     '<div class="campo"><label>Data</label><input type="date" id="l-data" value="' + iso(new Date()) + '"></div></div>' +
     campoUsuario('l-usuario') +
-    '<div class="dupla"><div class="campo"><label>Parcelar em</label>' +
+    '<div class="campo"><label>Tipo</label><select id="l-tipo" onchange="alternarParcelamento()">' +
+      '<option value="avulso">Gasto único</option>' +
+      '<option value="recorrente">Todo mês, gasto fixo</option>' +
+      '<option value="parcelado">Parcelado no cartão</option></select></div>' +
+    '<div class="dupla" id="linha-parcelas" style="display:none">' +
+      '<div class="campo"><label>Parcelas</label>' +
       '<select id="l-parcelas" onchange="alternarParcelamento()">' +
       Array.from({length:24}, (_,i) => '<option value="' + (i+1) + '">' + (i+1) + 'x</option>').join('') +
       '</select></div>' +
-      '<div class="campo" id="campo-cartao" style="display:none"><label>Cartão</label>' +
+      '<div class="campo"><label>Cartão</label>' +
       '<input type="text" id="l-cartao" placeholder="Nubank"></div></div>' +
     '<div class="campo"><label>Descrição</label><input type="text" id="l-desc" placeholder="opcional"></div>' +
     '<div class="aviso" id="aviso-parcela" style="display:none"></div>' +
-    '<button class="botao" onclick="salvarLancamento()">Salvar gasto</button>');
+    '<button class="botao" id="btn-salvar-gasto" onclick="salvarLancamento()">Salvar gasto</button>');
   trocarGrupo();
   document.getElementById('l-valor').oninput = alternarParcelamento;
   setTimeout(() => document.getElementById('l-valor').focus(), 80);
 }
 function alternarParcelamento(){
+  const tipo = document.getElementById('l-tipo').value;
   const n = numDireto(document.getElementById('l-parcelas').value) || 1;
   const v = numDireto(document.getElementById('l-valor').value);
-  document.getElementById('campo-cartao').style.display = n > 1 ? 'block' : 'none';
   const aviso = document.getElementById('aviso-parcela');
-  if (n > 1 && v){
-    const inicio = dISO(document.getElementById('l-data').value);
-    const fim = new Date(inicio.getFullYear(), inicio.getMonth() + n - 1, 1);
+  const btn = document.getElementById('btn-salvar-gasto');
+  document.getElementById('linha-parcelas').style.display = tipo === 'parcelado' ? 'flex' : 'none';
+  if (btn) btn.textContent = tipo === 'recorrente' ? 'Salvar gasto fixo'
+    : tipo === 'parcelado' ? 'Salvar parcelamento' : 'Salvar gasto';
+
+  if (tipo === 'recorrente'){
+    const dia = document.getElementById('l-data').value.slice(8,10);
     aviso.style.display = 'block';
-    aviso.innerHTML = n + ' parcelas de <b>' + brl(v/n) + '</b>, de ' +
-      MESES[inicio.getMonth()] + '/' + inicio.getFullYear() + ' a ' +
-      MESES[fim.getMonth()] + '/' + fim.getFullYear() +
-      '. Entra como compromisso de cada ciclo até acabar, não como gasto de hoje.';
-  } else if (n > 1){
+    aviso.innerHTML = v
+      ? 'Vira um gasto fixo de <b>' + brl(v) + '</b> todo dia ' + dia +
+        ', sem data para acabar. Entra no comprometido de cada ciclo e você edita ou remove em Contas.'
+      : 'Repete todo mês no mesmo dia da data escolhida, sem data para acabar.';
+    return;
+  }
+  if (tipo === 'parcelado'){
     aviso.style.display = 'block';
-    aviso.textContent = 'Informe o valor total da compra, o app divide pelas parcelas.';
-  } else aviso.style.display = 'none';
+    if (n > 1 && v){
+      const inicio = dISO(document.getElementById('l-data').value);
+      const fim = new Date(inicio.getFullYear(), inicio.getMonth() + n - 1, 1);
+      aviso.innerHTML = n + ' parcelas de <b>' + brl(v/n) + '</b>, de ' +
+        MESES[inicio.getMonth()] + '/' + inicio.getFullYear() + ' a ' +
+        MESES[fim.getMonth()] + '/' + fim.getFullYear() +
+        '. Entra como compromisso de cada ciclo até acabar, não como gasto de hoje.';
+    } else {
+      aviso.innerHTML = 'Informe o <b>valor total</b> da compra, o app divide pelas parcelas.';
+    }
+    return;
+  }
+  aviso.style.display = 'none';
 }
 function trocarGrupo(){
   const g = document.getElementById('l-grupo').value;
@@ -1214,8 +1236,19 @@ function trocarSub(){
 function salvarLancamento(){
   const v = numDireto(document.getElementById('l-valor').value);
   if (!v) { alert('Informe o valor.'); return; }
-  const n = numDireto(document.getElementById('l-parcelas').value) || 1;
+  const tipo = document.getElementById('l-tipo').value;
+  const n = tipo === 'parcelado' ? (numDireto(document.getElementById('l-parcelas').value) || 1) : 1;
   const dataL = document.getElementById('l-data').value;
+  if (tipo === 'recorrente'){
+    gravar('Fixos', {id: id(),
+      descricao: document.getElementById('l-desc').value || document.getElementById('l-sub').value,
+      grupo: document.getElementById('l-grupo').value,
+      subgrupo: document.getElementById('l-sub').value,
+      valor: v.toFixed(2), dia_vencimento: String(numDireto(dataL.slice(8,10)) || 1),
+      usuario: document.getElementById('l-usuario').value, ativo:'sim'});
+    fecharFolha();
+    return;
+  }
   if (n > 1){
     gravar('Parcelas', {id: id(),
       descricao: document.getElementById('l-desc').value || document.getElementById('l-sub').value,
@@ -1514,6 +1547,7 @@ function lancarSimulado(){
   setTimeout(() => {
     document.getElementById('l-valor').value = total;
     document.getElementById('l-desc').value = desc;
+    document.getElementById('l-tipo').value = n > 1 ? 'parcelado' : 'avulso';
     document.getElementById('l-parcelas').value = String(n);
     alternarParcelamento();
   }, 60);

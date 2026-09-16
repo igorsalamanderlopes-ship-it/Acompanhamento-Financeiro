@@ -290,6 +290,10 @@ h2{font-size:13px;font-weight:600;color:var(--fraca);margin:28px 0 10px;
     <div class="bloco" id="ajuste-carteiras"></div>
     <button class="botao secundario" onclick="abrirCarteira()">Adicionar carteira</button>
 
+    <h2>Cartões de crédito</h2>
+    <div class="bloco" id="ajuste-cartoes"></div>
+    <button class="botao secundario" onclick="abrirCartao()">Adicionar cartão</button>
+
     <h2>Grupos e subgrupos</h2>
     <div class="bloco" id="ajuste-categorias"></div>
     <button class="botao secundario" onclick="abrirCategoria()">Adicionar subgrupo</button>
@@ -328,7 +332,7 @@ h2{font-size:13px;font-weight:600;color:var(--fraca);margin:28px 0 10px;
 
 <script>
 /* ---------- estado e utilitários ---------- */
-const ABAS = ['Config','Usuarios','Categorias','Carteiras','CreditosCarteira','Rendas','Fixos','Parcelas','Metas','Lancamentos','Feriados'];
+const ABAS = ['Config','Usuarios','Categorias','Carteiras','Cartoes','CreditosCarteira','Rendas','Fixos','Parcelas','Metas','Lancamentos','Feriados'];
 let dados = {};
 ABAS.forEach(a => dados[a] = []);
 let fila = [];
@@ -463,6 +467,12 @@ function compromissosDo(c){
     });
   });
 
+  faturasDoCiclo(c).forEach(f => {
+    itens.push({tipo:'fatura', nome:'Fatura ' + f.cartao.nome +
+      (escopo === 'casa' ? ' · ' + nomeUsuario(f.usuario) : ''),
+      valor: f.total, data: f.data, cartao: f.cartao.nome});
+  });
+
   dados.Metas.filter(m => m.ativo !== 'não' && m.ativo !== 'nao' && !m.prioridade).forEach(m => {
     const ids = escopoIds();
     let v = 0;
@@ -509,7 +519,8 @@ function rendaDo(c){
 
 function gastosDinheiro(c){
   return dados.Lancamentos.filter(l => dentro(l.data, c) &&
-    (l.carteira || 'DINHEIRO') === 'DINHEIRO' && noEscopo(l));
+    (l.carteira || 'DINHEIRO') === 'DINHEIRO' &&
+    String(l.forma||'').indexOf('CARTÃO') !== 0 && noEscopo(l));
 }
 
 function resumo(c){
@@ -563,6 +574,40 @@ function previsaoMeta(m){
 function metasDoUsuario(uid){
   return dados.Metas.filter(m => m.usuario === uid && m.prioridade &&
     m.ativo !== 'não' && m.ativo !== 'nao');
+}
+
+function cartoesDe(uid){
+  return dados.Cartoes.filter(c => c.ativo !== 'não' && c.ativo !== 'nao' &&
+    (!c.usuario || !uid || c.usuario === uid));
+}
+function cartaoPorForma(forma, uid){
+  const nome = String(forma||'').replace(/^CARTÃO:/, '');
+  return cartoesDe(uid).find(c => c.nome === nome) || cartoesDe(uid)[0] || null;
+}
+// Compra feita até o fechamento entra na fatura que vence logo depois.
+function vencimentoDaCompra(dataStr, cartao){
+  const d = dISO(dataStr);
+  const fech = numDireto(cartao.dia_fechamento) || 1;
+  const venc = numDireto(cartao.dia_vencimento) || 10;
+  let mes = d.getMonth(), ano = d.getFullYear();
+  if (d.getDate() > fech) mes += 1;
+  if (venc <= fech) mes += 1;
+  return diaValido(ano, mes, venc);
+}
+function faturasDoCiclo(c){
+  const saida = [];
+  escopoIds().forEach(uid => {
+    cartoesDe(uid).forEach(cartao => {
+      const itens = dados.Lancamentos.filter(l => l.usuario === uid &&
+        String(l.forma||'').indexOf('CARTÃO') === 0 &&
+        cartaoPorForma(l.forma, uid) && cartaoPorForma(l.forma, uid).id === cartao.id &&
+        (() => { const v = vencimentoDaCompra(l.data, cartao); return v >= c.inicio && v <= c.fim; })());
+      const total = itens.reduce((t,l) => t + num(l.valor), 0);
+      if (total > 0) saida.push({cartao, total, itens, usuario: uid,
+        data: vencimentoDaCompra(itens[0].data, cartao)});
+    });
+  });
+  return saida;
 }
 
 function saldoCarteira(cart, ref){
@@ -714,18 +759,18 @@ function pintarProximo(lista, atual){
   const el = document.getElementById('proximo-ciclo');
   if (!prox){ el.innerHTML = '<div class="vazio">Sem projeção.</div>'; return; }
   const rp = resumo(prox);
-  const porTipo = {fixo:0, parcela:0, meta:0};
+  const porTipo = {fixo:0, parcela:0, meta:0, fatura:0};
   rp.compromissos.forEach(i => porTipo[i.tipo] += i.valor);
   const pct = rp.renda.total > 0 ? Math.min(100, rp.comprometido/rp.renda.total*100) : 0;
   el.innerHTML = '<div class="grupo-linha"><div class="grupo-topo"><span>' + prox.rotulo +
     ', ' + prox.dias + ' dias</span><span>' + brl(rp.diariaInicial) + '/dia</span></div>' +
     '<div class="pilha">' +
       barraPilha(porTipo.fixo, rp.renda.total, '#16223B') +
-      barraPilha(porTipo.parcela, rp.renda.total, '#B23A2F') +
+      barraPilha(porTipo.parcela + porTipo.fatura, rp.renda.total, '#B23A2F') +
       barraPilha(porTipo.meta + rp.reserva, rp.renda.total, '#1E7A5E') +
     '</div><div class="pilha-legenda">' +
       '<span><em style="background:#16223B"></em>fixos ' + brl(porTipo.fixo) + '</span>' +
-      '<span><em style="background:#B23A2F"></em>parcelas ' + brl(porTipo.parcela) + '</span>' +
+      '<span><em style="background:#B23A2F"></em>cartão ' + brl(porTipo.parcela + porTipo.fatura) + '</span>' +
       '<span><em style="background:#1E7A5E"></em>economia ' + brl(porTipo.meta + rp.reserva) + '</span>' +
       '<span>livre ' + brl(rp.margem) + '</span></div>' +
     '<div class="grupo-sub">' + Math.round(pct) + '% da renda já comprometida antes do primeiro gasto' +
@@ -792,6 +837,7 @@ function pintarHoje(r, hoje){
     ? (r.reserva ? linhaItem('Reserva automática', r.reservaPct + '% da renda', brl(r.reserva)) : '') +
       r.compromissos.sort((a,b) => a.data - b.data).map(i =>
         linhaItem(i.nome, curto(i.data) + ' · ' + (i.tipo === 'parcela' ? esc(i.cartao||'cartão') :
+          i.tipo === 'fatura' ? 'compras no crédito' :
           i.tipo === 'meta' ? 'aporte do ciclo' : [i.grupo,i.subgrupo].filter(Boolean).join(' · ')),
           brl(i.valor))).join('')
     : '<div class="vazio">Sem compromissos neste ciclo.</div>';
@@ -800,7 +846,9 @@ function pintarHoje(r, hoje){
   document.getElementById('lista-lancamentos').innerHTML = ult.length ? ult.map(l =>
     '<div class="item"><div class="item-txt"><b>' + esc(l.descricao || l.subgrupo) +
     '</b><small>' + curto(dISO(l.data)) + ' · ' + esc(l.grupo) + ' · ' + esc(l.subgrupo) +
-    (l.carteira && l.carteira !== 'DINHEIRO' ? '<span class="tag">' + esc(l.carteira) + '</span>' : '') +
+    (l.carteira && l.carteira !== 'DINHEIRO' ? '<span class="tag">' + esc(l.carteira) + '</span>'
+      : String(l.forma||'').indexOf('CARTÃO') === 0
+        ? '<span class="tag">' + esc(l.forma.slice(7)) + ', crédito</span>' : '') +
     (l.usuario && escopo === 'casa' ? '<span class="tag">' + esc(nomeUsuario(l.usuario)) + '</span>' : '') +
     '</small></div><div class="item-val">' + brl(num(l.valor)) +
     '</div><button class="apagar" onclick="remover(\'Lancamentos\',\'' + l.id + '\')">&times;</button></div>'
@@ -974,7 +1022,7 @@ function pintarContas(lista){
   proximos.forEach(c => {
     const r = resumo(c);
     const k = c.inicio.getFullYear()+'-'+pad(c.inicio.getMonth()+1);
-    porMes[k] = porMes[k] || {renda:0, fixo:0, parcela:0, meta:0, reserva:0, margem:0};
+    porMes[k] = porMes[k] || {renda:0, fixo:0, parcela:0, meta:0, fatura:0, reserva:0, margem:0};
     porMes[k].renda += r.renda.total;
     porMes[k].reserva += r.reserva;
     porMes[k].margem += r.margem;
@@ -989,7 +1037,7 @@ function pintarContas(lista){
       '</span><span>' + brl(m.margem) + ' livre</span></div>' +
       '<div class="barra ok"><i style="width:' + Math.max(0, m.margem/maxMargem*100) + '%"></i></div>' +
       '<div class="grupo-sub">renda ' + brl(m.renda) + ' · fixos ' + brl(m.fixo) +
-      ' · parcelas ' + brl(m.parcela) + ' · metas ' + brl(m.meta) +
+      ' · cartão ' + brl(m.parcela + m.fatura) + ' · metas ' + brl(m.meta) +
       ' · reserva ' + brl(m.reserva) + '</div></div>';
   }).join('');
 }
@@ -1118,6 +1166,14 @@ function pintarAjustes(){
         '</div>';
     }).join('') : '<div class="vazio">Nenhuma carteira.</div>';
 
+  document.getElementById('ajuste-cartoes').innerHTML = dados.Cartoes.length
+    ? dados.Cartoes.map(c => '<div class="item"><div class="item-txt"><b>' + esc(c.nome) +
+      '</b><small>fecha dia ' + esc(c.dia_fechamento) + ', vence dia ' + esc(c.dia_vencimento) +
+        (c.usuario ? ' · ' + esc(nomeUsuario(c.usuario)) : '') + '</small></div>' +
+      '<button class="apagar" onclick="abrirCartao(\'' + c.id + '\')">&#9998;</button>' +
+      '<button class="apagar" onclick="remover(\'Cartoes\',\'' + c.id + '\')">&times;</button></div>').join('')
+    : '<div class="vazio">Nenhum cartão cadastrado.</div>';
+
   const porGrupo = {};
   dados.Categorias.forEach(c => { (porGrupo[c.grupo] = porGrupo[c.grupo] || []).push(c); });
   document.getElementById('ajuste-categorias').innerHTML = Object.keys(porGrupo).length ?
@@ -1152,11 +1208,16 @@ function campoUsuario(idCampo, sel){
   return '<div class="campo"><label>Pessoa</label><select id="' + idCampo + '">' +
     opcoesUsuario(sel) + '</select></div>';
 }
-function opcoesCarteira(sel, usuario){
-  const lista = dados.Carteiras.filter(c => !c.usuario || !usuario || c.usuario === usuario);
+function opcoesPagamento(usuario, sel){
+  const carts = dados.Carteiras.filter(c => c.nome !== 'DINHEIRO' &&
+    c.ativo !== 'não' && c.ativo !== 'nao' && (!c.usuario || !usuario || c.usuario === usuario));
   const vistos = [];
-  return lista.filter(c => { if (vistos.indexOf(c.nome) >= 0) return false; vistos.push(c.nome); return true; })
-    .map(c => '<option' + (c.nome === sel ? ' selected':'') + '>' + esc(c.nome) + '</option>').join('');
+  const beneficios = carts.filter(c => { if (vistos.indexOf(c.nome) >= 0) return false;
+    vistos.push(c.nome); return true; });
+  const op = (v, t) => '<option value="' + esc(v) + '"' + (v === sel ? ' selected':'') + '>' + esc(t) + '</option>';
+  return op('CONTA', 'Conta, débito ou dinheiro') +
+    cartoesDe(usuario).map(c => op('CARTÃO:' + c.nome, c.nome + ', crédito')).join('') +
+    beneficios.map(c => op('BENEFÍCIO:' + c.nome, c.nome)).join('');
 }
 
 function abrirLancamento(){
@@ -1165,8 +1226,8 @@ function abrirLancamento(){
     '<div class="campo"><label>Valor</label><input type="number" step="0.01" inputmode="decimal" id="l-valor" autofocus></div>' +
     '<div class="dupla"><div class="campo"><label>Grupo</label><select id="l-grupo" onchange="trocarGrupo()">' + opcoesGrupo(g0) + '</select></div>' +
     '<div class="campo"><label>Subgrupo</label><select id="l-sub" onchange="trocarSub()">' + opcoesSub(g0) + '</select></div></div>' +
-    '<div class="dupla"><div class="campo"><label>Carteira</label><select id="l-carteira">' +
-      opcoesCarteira(null, usuarioAtivo()) + '</select></div>' +
+    '<div class="dupla"><div class="campo"><label>Pagamento</label><select id="l-pagamento">' +
+      opcoesPagamento(usuarioAtivo()) + '</select></div>' +
     '<div class="campo"><label>Data</label><input type="date" id="l-data" value="' + iso(new Date()) + '"></div></div>' +
     campoUsuario('l-usuario') +
     '<div class="campo"><label>Tipo</label><select id="l-tipo" onchange="alternarParcelamento()">' +
@@ -1179,7 +1240,9 @@ function abrirLancamento(){
       Array.from({length:24}, (_,i) => '<option value="' + (i+1) + '">' + (i+1) + 'x</option>').join('') +
       '</select></div>' +
       '<div class="campo"><label>Cartão</label>' +
-      '<input type="text" id="l-cartao" placeholder="Nubank"></div></div>' +
+      '<input type="text" id="l-cartao" list="lista-cartoes" placeholder="Nubank">' +
+      '<datalist id="lista-cartoes">' + cartoesDe(usuarioAtivo())
+        .map(c => '<option value="' + esc(c.nome) + '">').join('') + '</datalist></div></div>' +
     '<div class="campo"><label>Descrição</label><input type="text" id="l-desc" placeholder="opcional"></div>' +
     '<div class="aviso" id="aviso-parcela" style="display:none"></div>' +
     '<button class="botao" id="btn-salvar-gasto" onclick="salvarLancamento()">Salvar gasto</button>');
@@ -1230,13 +1293,15 @@ function trocarGrupo(){
 function trocarSub(){
   const s = document.getElementById('l-sub');
   const cart = s.options[s.selectedIndex] ? s.options[s.selectedIndex].dataset.carteira : 'DINHEIRO';
-  const sel = document.getElementById('l-carteira');
-  [...sel.options].forEach(o => o.selected = (o.value === cart || o.text === cart));
+  const sel = document.getElementById('l-pagamento');
+  const alvo = cart && cart !== 'DINHEIRO' ? 'BENEFÍCIO:' + cart : 'CONTA';
+  if ([...sel.options].some(o => o.value === alvo)) sel.value = alvo;
 }
 function salvarLancamento(){
   const v = numDireto(document.getElementById('l-valor').value);
   if (!v) { alert('Informe o valor.'); return; }
   const tipo = document.getElementById('l-tipo').value;
+  const pgto = document.getElementById('l-pagamento').value;
   const n = tipo === 'parcelado' ? (numDireto(document.getElementById('l-parcelas').value) || 1) : 1;
   const dataL = document.getElementById('l-data').value;
   if (tipo === 'recorrente'){
@@ -1252,7 +1317,8 @@ function salvarLancamento(){
   if (n > 1){
     gravar('Parcelas', {id: id(),
       descricao: document.getElementById('l-desc').value || document.getElementById('l-sub').value,
-      cartao: document.getElementById('l-cartao').value || 'cartão',
+      cartao: document.getElementById('l-cartao').value ||
+        (pgto.indexOf('CARTÃO:') === 0 ? pgto.slice(7) : 'cartão'),
       grupo: document.getElementById('l-grupo').value,
       subgrupo: document.getElementById('l-sub').value,
       valor_parcela: (v/n).toFixed(2), parcela_atual: '1', total_parcelas: String(n),
@@ -1267,8 +1333,9 @@ function salvarLancamento(){
     grupo: document.getElementById('l-grupo').value,
     subgrupo: document.getElementById('l-sub').value,
     valor: v.toFixed(2),
-    carteira: document.getElementById('l-carteira').value,
-    forma: '', usuario: document.getElementById('l-usuario').value,
+    carteira: pgto.indexOf('BENEFÍCIO:') === 0 ? pgto.slice(10) : 'DINHEIRO',
+    forma: pgto.indexOf('BENEFÍCIO:') === 0 ? 'BENEFÍCIO' : pgto,
+    usuario: document.getElementById('l-usuario').value,
     criado_em: new Date().toISOString()
   });
   fecharFolha();
@@ -1564,6 +1631,31 @@ function salvarUsuario(){
   const nome = document.getElementById('u-nome').value.trim();
   if (!nome) { alert('Informe o nome.'); return; }
   gravar('Usuarios', {id: document.getElementById('u-id').value || id(), nome: nome, ativo:'sim'});
+  fecharFolha();
+}
+
+function abrirCartao(idc){
+  const c = dados.Cartoes.find(x => x.id === idc) || {};
+  abrirFolha(idc ? 'Editar cartão' : 'Novo cartão',
+    '<div class="campo"><label>Nome</label><input type="text" id="k-nome" value="' + esc(c.nome||'') +
+      '" placeholder="Nubank"></div>' +
+    '<div class="dupla"><div class="campo"><label>Dia do fechamento</label>' +
+      '<input type="number" min="1" max="31" id="k-fech" value="' + esc(c.dia_fechamento||'') + '"></div>' +
+    '<div class="campo"><label>Dia do vencimento</label>' +
+      '<input type="number" min="1" max="31" id="k-venc" value="' + esc(c.dia_vencimento||'') + '"></div></div>' +
+    campoUsuario('k-usuario', c.usuario) +
+    '<input type="hidden" id="k-id" value="' + esc(idc||'') + '">' +
+    '<button class="botao" onclick="salvarCartao()">Salvar cartão</button>' +
+    '<div class="aviso">Compras no crédito não saem da margem do dia. Elas se juntam na fatura ' +
+    'e entram como compromisso no ciclo em que a fatura vence.</div>');
+}
+function salvarCartao(){
+  const nome = document.getElementById('k-nome').value.trim();
+  if (!nome) { alert('Informe o nome do cartão.'); return; }
+  gravar('Cartoes', {id: document.getElementById('k-id').value || id(), nome: nome,
+    dia_fechamento: document.getElementById('k-fech').value || '1',
+    dia_vencimento: document.getElementById('k-venc').value || '10',
+    limite: '', usuario: document.getElementById('k-usuario').value, ativo:'sim'});
   fecharFolha();
 }
 
